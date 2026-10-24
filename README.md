@@ -25,7 +25,7 @@ internal/storage/             работа с базой (пока пусто)
 
 ## Как запустить
 
-Понадобятся [Go 1.26+](https://go.dev/dl/) и, для запуска в контейнере, [Docker](https://www.docker.com/products/docker-desktop/).
+Понадобятся [Go 1.26+](https://go.dev/dl/) и [Docker](https://www.docker.com/products/docker-desktop/) для запуска в контейнере.
 
 ### Локально
 
