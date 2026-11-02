@@ -29,6 +29,11 @@ go.work.sum
 # env file
 .env
 
+# Local Telegram authorization sessions (sensitive account credentials)
+/var/telegram/
+*.session
+*.session.*
+
 # Editor/IDE
 .idea/
 .vscode/

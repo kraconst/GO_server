@@ -48,7 +48,7 @@ func (h *Handler) GetByID(c *gin.Context) {
 	}
 
 	for _, a := range mockAccounts {
-		if a.ID == id {
+		if a.ID == int64(id) {
 			c.JSON(200, a)
 			return
 		}
@@ -65,7 +65,7 @@ func (h *Handler) Create(c *gin.Context) {
 	}
 
 	acc := domain.Account{
-		ID:           len(mockAccounts) + 1,
+		ID:           int64(len(mockAccounts) + 1),
 		Phone:        req.Phone,
 		Username:     req.Username,
 		EmployeeName: req.EmployeeName,
