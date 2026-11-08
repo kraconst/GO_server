@@ -5,10 +5,25 @@ import (
 
 	"github.com/kraconst/GO_server/internal/config"
 	"github.com/kraconst/GO_server/internal/handler"
+	"github.com/kraconst/GO_server/internal/storage/postgres"
+	"github.com/kraconst/GO_server/internal/usecase"
 )
 
 func main() {
 	cfg := config.Must()
-	h := handler.New()
+
+	db, err := postgres.New(cfg.DB.DSN())
+	var accountUsecase *usecase.AccountUsecase
+	if err != nil {
+		log.Printf("PostgreSQL connection failed: %v (run 'docker compose up -d' to start database)", err)
+		log.Println("Starting server with mock fallback...")
+	} else {
+		defer db.Close()
+		log.Println("Connected to PostgreSQL successfully")
+		accountRepo := postgres.NewAccountStorage(db)
+		accountUsecase = usecase.NewAccountUsecase(accountRepo)
+	}
+
+	h := handler.New(accountUsecase)
 	log.Fatal(h.Run(cfg.Addr))
 }

@@ -1,16 +1,22 @@
 package handler
 
 import (
+	"errors"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kraconst/GO_server/internal/domain"
+	"github.com/kraconst/GO_server/internal/usecase"
 )
 
-type Handler struct{}
+type Handler struct {
+	accountUsecase *usecase.AccountUsecase
+}
 
-func New() *Handler { return &Handler{} }
+func New(accountUsecase *usecase.AccountUsecase) *Handler {
+	return &Handler{accountUsecase: accountUsecase}
+}
 
 var mockAccounts = []domain.Account{
 	{ID: 1, Phone: "+79991112233", Username: "@sales_anna", EmployeeName: "Анна", Status: domain.StatusActive, CreatedAt: time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)},
@@ -37,7 +43,17 @@ func (h *Handler) Health(c *gin.Context) {
 }
 
 func (h *Handler) List(c *gin.Context) {
-	c.JSON(200, mockAccounts)
+	if h.accountUsecase == nil {
+		c.JSON(200, mockAccounts)
+		return
+	}
+
+	accounts, err := h.accountUsecase.List(c.Request.Context(), 1)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, accounts)
 }
 
 func (h *Handler) GetByID(c *gin.Context) {
@@ -47,16 +63,29 @@ func (h *Handler) GetByID(c *gin.Context) {
 		return
 	}
 
-	for _, a := range mockAccounts {
-		if a.ID == int64(id) {
-			c.JSON(200, a)
+	if h.accountUsecase == nil {
+		for _, a := range mockAccounts {
+			if a.ID == int64(id) {
+				c.JSON(200, a)
+				return
+			}
+		}
+		c.JSON(404, gin.H{"error": "account not found"})
+		return
+	}
+
+	acc, err := h.accountUsecase.GetByID(c.Request.Context(), int64(id))
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			c.JSON(404, gin.H{"error": "account not found"})
 			return
 		}
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
 	}
-	c.JSON(404, gin.H{"error": "account not found"})
+	c.JSON(200, acc)
 }
 
-// Create пока ничего не сохраняет: хранение появится в storage.
 func (h *Handler) Create(c *gin.Context) {
 	var req createAccountRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -64,13 +93,29 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 
-	acc := domain.Account{
-		ID:           int64(len(mockAccounts) + 1),
+	if h.accountUsecase == nil {
+		acc := domain.Account{
+			ID:           int64(len(mockAccounts) + 1),
+			Phone:        req.Phone,
+			Username:     req.Username,
+			EmployeeName: req.EmployeeName,
+			Status:       domain.StatusActive,
+			CreatedAt:    time.Now(),
+		}
+		c.JSON(201, acc)
+		return
+	}
+
+	acc, err := h.accountUsecase.Create(c.Request.Context(), usecase.CreateAccountInput{
+		CompanyID:    1,
+		EmployeeID:   1,
 		Phone:        req.Phone,
 		Username:     req.Username,
 		EmployeeName: req.EmployeeName,
-		Status:       domain.StatusActive,
-		CreatedAt:    time.Now(),
+	})
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
 	}
 	c.JSON(201, acc)
 }
