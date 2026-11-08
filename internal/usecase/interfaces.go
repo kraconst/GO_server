@@ -21,6 +21,7 @@ type EmployeeRepository interface {
 	Create(ctx context.Context, emp domain.Employee) (int64, error)
 	GetByID(ctx context.Context, id int64) (*domain.Employee, error)
 	ListByCompany(ctx context.Context, companyID int64) ([]domain.Employee, error)
+	Update(ctx context.Context, emp domain.Employee) error
 	Deactivate(ctx context.Context, id int64) error
 }
 
