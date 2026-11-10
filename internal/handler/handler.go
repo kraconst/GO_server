@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"sort"
 	"strconv"
 	"time"
 
@@ -14,19 +15,29 @@ type Handler struct {
 	accountUsecase  *usecase.AccountUsecase
 	employeeUsecase *usecase.EmployeeUsecase
 	messageUsecase  *usecase.MessageUsecase
+	contactUsecase  *usecase.ContactUsecase
+	chatUsecase     *usecase.ChatUsecase
 }
 
-func New(accountUsecase *usecase.AccountUsecase, employeeUsecase *usecase.EmployeeUsecase, messageUsecase *usecase.MessageUsecase) *Handler {
+func New(
+	accountUsecase *usecase.AccountUsecase,
+	employeeUsecase *usecase.EmployeeUsecase,
+	messageUsecase *usecase.MessageUsecase,
+	contactUsecase *usecase.ContactUsecase,
+	chatUsecase *usecase.ChatUsecase,
+) *Handler {
 	return &Handler{
 		accountUsecase:  accountUsecase,
 		employeeUsecase: employeeUsecase,
 		messageUsecase:  messageUsecase,
+		contactUsecase:  contactUsecase,
+		chatUsecase:     chatUsecase,
 	}
 }
 
 var mockAccounts = []domain.Account{
-	{ID: 1, Phone: "+79991112233", Username: "@sales_anna", EmployeeName: "Анна", Status: domain.StatusActive, CreatedAt: time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)},
-	{ID: 2, Phone: "+79994445566", Username: "@support_oleg", EmployeeName: "Олег", Status: domain.StatusDisconnected, CreatedAt: time.Date(2026, 9, 15, 14, 30, 0, 0, time.UTC)},
+	{ID: 1, CompanyID: 1, EmployeeID: 1, Phone: "+79991112233", Username: "@sales_anna", EmployeeName: "Анна", Status: domain.StatusActive, CreatedAt: time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)},
+	{ID: 2, CompanyID: 1, EmployeeID: 2, Phone: "+79994445566", Username: "@support_oleg", EmployeeName: "Олег", Status: domain.StatusDisconnected, CreatedAt: time.Date(2026, 9, 15, 14, 30, 0, 0, time.UTC)},
 }
 
 var mockEmployees = []domain.Employee{
@@ -37,6 +48,48 @@ var mockEmployees = []domain.Employee{
 var mockMessages = []domain.Message{
 	{ID: 1, ChatID: 1, TelegramMessageID: 101, Direction: domain.MessageDirectionIn, Text: "Здравствуйте! Подскажите по условиям.", SentAt: time.Date(2026, 9, 1, 10, 5, 0, 0, time.UTC)},
 	{ID: 2, ChatID: 1, TelegramMessageID: 102, Direction: domain.MessageDirectionOut, Text: "Добрый день! Сейчас направлю КП.", SentAt: time.Date(2026, 9, 1, 10, 6, 0, 0, time.UTC)},
+}
+
+var mockContacts = []domain.Contact{
+	{
+		ID:             1,
+		CompanyID:      1,
+		TelegramUserID: 10001,
+		Name:           "Иван Петров",
+		Username:       "ivan_p",
+	},
+	{
+		ID:             2,
+		CompanyID:      1,
+		TelegramUserID: 10002,
+		Name:           "Мария Смирнова",
+		Username:       "maria_s",
+	},
+}
+
+var mockChats = []domain.Chat{
+	{
+		ID:                 1,
+		AccountID:          1,
+		ContactID:          1,
+		Status:             domain.ChatStatusNewLead,
+		StatusSource:       domain.StatusSourceAuto,
+		Priority:           domain.ChatPriorityNormal,
+		LastMessageAt:      time.Date(2026, 9, 1, 10, 6, 0, 0, time.UTC),
+		AwaitingReplySince: nil,
+		UnreadCount:        0,
+	},
+	{
+		ID:                 2,
+		AccountID:          2,
+		ContactID:          2,
+		Status:             domain.ChatStatusNegotiation,
+		StatusSource:       domain.StatusSourceManual,
+		Priority:           domain.ChatPriorityHigh,
+		LastMessageAt:      time.Date(2026, 9, 15, 15, 0, 0, 0, time.UTC),
+		AwaitingReplySince: nil,
+		UnreadCount:        1,
+	},
 }
 
 type createAccountRequest struct {
@@ -55,6 +108,10 @@ type updateEmployeeRequest struct {
 	Position string `json:"position"`
 }
 
+type updateChatStatusRequest struct {
+	Status domain.ChatStatus `json:"status" binding:"required"`
+}
+
 func (h *Handler) Run(addr string) error {
 	r := gin.Default()
 	r.GET("/health", h.Health)
@@ -70,6 +127,11 @@ func (h *Handler) Run(addr string) error {
 	r.POST("/employees", h.CreateEmployee)
 	r.POST("/employees/:id", h.UpdateEmployee)
 	r.POST("/employees/:id/deactivate", h.DeactivateEmployee)
+
+	// Chats
+	r.GET("/chats", h.ListChats)
+	r.GET("/chats/:id", h.GetChatByID)
+	r.POST("/chats/:id/status", h.UpdateChatStatus)
 
 	// Messages
 	r.GET("/chats/:id/messages", h.ListMessagesByChat)
@@ -295,6 +357,178 @@ func (h *Handler) DeactivateEmployee(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"status": "deactivated"})
+}
+
+// --- Chats ---
+
+func (h *Handler) ListChats(c *gin.Context) {
+	var status *domain.ChatStatus
+	if s := c.Query("status"); s != "" {
+		st := domain.ChatStatus(s)
+		switch st {
+		case domain.ChatStatusNewLead,
+			domain.ChatStatusNegotiation,
+			domain.ChatStatusWaitingReply,
+			domain.ChatStatusInterested,
+			domain.ChatStatusUnhappy,
+			domain.ChatStatusLost,
+			domain.ChatStatusActionRequired:
+			status = &st
+		default:
+			c.JSON(400, gin.H{"error": "invalid status"})
+			return
+		}
+	}
+
+	var employeeID *int64
+	if empStr := c.Query("employee_id"); empStr != "" {
+		empID, err := strconv.ParseInt(empStr, 10, 64)
+		if err != nil || empID <= 0 {
+			c.JSON(400, gin.H{"error": "employee_id must be a positive number"})
+			return
+		}
+		employeeID = &empID
+	}
+
+	if h.chatUsecase == nil {
+		res := make([]domain.Chat, 0)
+		for _, chat := range mockChats {
+			if status != nil && chat.Status != *status {
+				continue
+			}
+			if employeeID != nil {
+				matched := false
+				for _, acc := range mockAccounts {
+					if acc.ID == chat.AccountID && acc.EmployeeID == *employeeID {
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					continue
+				}
+			}
+			res = append(res, chat)
+		}
+
+		sort.Slice(res, func(i, j int) bool {
+			if res[i].LastMessageAt.Equal(res[j].LastMessageAt) {
+				return res[i].ID > res[j].ID
+			}
+			return res[i].LastMessageAt.After(res[j].LastMessageAt)
+		})
+
+		c.JSON(200, res)
+		return
+	}
+
+	chats, err := h.chatUsecase.ListByCompany(c.Request.Context(), 1, status, employeeID)
+	if err != nil {
+		if errors.Is(err, domain.ErrValidation) {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if chats == nil {
+		chats = make([]domain.Chat, 0)
+	}
+	c.JSON(200, chats)
+}
+
+func (h *Handler) GetChatByID(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(400, gin.H{"error": "id must be a positive number"})
+		return
+	}
+
+	if h.chatUsecase == nil {
+		for _, chat := range mockChats {
+			if chat.ID == id {
+				c.JSON(200, chat)
+				return
+			}
+		}
+		c.JSON(404, gin.H{"error": "chat not found"})
+		return
+	}
+
+	chat, err := h.chatUsecase.GetByID(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			c.JSON(404, gin.H{"error": "chat not found"})
+			return
+		}
+		if errors.Is(err, domain.ErrValidation) {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, chat)
+}
+
+func (h *Handler) UpdateChatStatus(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(400, gin.H{"error": "id must be a positive number"})
+		return
+	}
+
+	var req updateChatStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	if h.chatUsecase == nil {
+		switch req.Status {
+		case domain.ChatStatusNewLead,
+			domain.ChatStatusNegotiation,
+			domain.ChatStatusWaitingReply,
+			domain.ChatStatusInterested,
+			domain.ChatStatusUnhappy,
+			domain.ChatStatusLost,
+			domain.ChatStatusActionRequired:
+		default:
+			c.JSON(400, gin.H{"error": "invalid status"})
+			return
+		}
+
+		found := false
+		for i := range mockChats {
+			if mockChats[i].ID == id {
+				mockChats[i].Status = req.Status
+				mockChats[i].StatusSource = domain.StatusSourceManual
+				found = true
+				break
+			}
+		}
+		if !found {
+			c.JSON(404, gin.H{"error": "chat not found"})
+			return
+		}
+		c.JSON(200, gin.H{"status": "updated"})
+		return
+	}
+
+	err = h.chatUsecase.SetManualStatus(c.Request.Context(), id, req.Status)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			c.JSON(404, gin.H{"error": "chat not found"})
+			return
+		}
+		if errors.Is(err, domain.ErrValidation) {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"status": "updated"})
 }
 
 // --- Messages ---
