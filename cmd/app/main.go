@@ -15,6 +15,7 @@ func main() {
 	db, err := postgres.New(cfg.DB.DSN())
 	var accountUsecase *usecase.AccountUsecase
 	var employeeUsecase *usecase.EmployeeUsecase
+	var messageUsecase *usecase.MessageUsecase
 
 	if err != nil {
 		log.Printf("PostgreSQL connection failed: %v (run 'docker compose up -d' to start database)", err)
@@ -25,11 +26,13 @@ func main() {
 
 		accountRepo := postgres.NewAccountStorage(db)
 		employeeRepo := postgres.NewEmployeeStorage(db)
+		messageRepo := postgres.NewMessageStorage(db)
 
 		accountUsecase = usecase.NewAccountUsecase(accountRepo)
 		employeeUsecase = usecase.NewEmployeeUsecase(employeeRepo)
+		messageUsecase = usecase.NewMessageUsecase(messageRepo)
 	}
 
-	h := handler.New(accountUsecase, employeeUsecase)
+	h := handler.New(accountUsecase, employeeUsecase, messageUsecase)
 	log.Fatal(h.Run(cfg.Addr))
 }
