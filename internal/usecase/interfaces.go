@@ -30,3 +30,9 @@ type CompanyRepository interface {
 	Create(ctx context.Context, comp domain.Company) (int64, error)
 	GetByID(ctx context.Context, id int64) (*domain.Company, error)
 }
+
+// MessageRepository определяет контракт доступа к сообщениям диалогов.
+type MessageRepository interface {
+	Create(ctx context.Context, msg domain.Message) (int64, error)
+	ListByChat(ctx context.Context, chatID int64, limit, offset int) ([]domain.Message, error)
+}

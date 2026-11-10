@@ -13,12 +13,14 @@ import (
 type Handler struct {
 	accountUsecase  *usecase.AccountUsecase
 	employeeUsecase *usecase.EmployeeUsecase
+	messageUsecase  *usecase.MessageUsecase
 }
 
-func New(accountUsecase *usecase.AccountUsecase, employeeUsecase *usecase.EmployeeUsecase) *Handler {
+func New(accountUsecase *usecase.AccountUsecase, employeeUsecase *usecase.EmployeeUsecase, messageUsecase *usecase.MessageUsecase) *Handler {
 	return &Handler{
 		accountUsecase:  accountUsecase,
 		employeeUsecase: employeeUsecase,
+		messageUsecase:  messageUsecase,
 	}
 }
 
@@ -30,6 +32,11 @@ var mockAccounts = []domain.Account{
 var mockEmployees = []domain.Employee{
 	{ID: 1, CompanyID: 1, Name: "Анна", Position: "Менеджер по продажам", IsActive: true},
 	{ID: 2, CompanyID: 1, Name: "Олег", Position: "Служба поддержки", IsActive: true},
+}
+
+var mockMessages = []domain.Message{
+	{ID: 1, ChatID: 1, TelegramMessageID: 101, Direction: domain.MessageDirectionIn, Text: "Здравствуйте! Подскажите по условиям.", SentAt: time.Date(2026, 9, 1, 10, 5, 0, 0, time.UTC)},
+	{ID: 2, ChatID: 1, TelegramMessageID: 102, Direction: domain.MessageDirectionOut, Text: "Добрый день! Сейчас направлю КП.", SentAt: time.Date(2026, 9, 1, 10, 6, 0, 0, time.UTC)},
 }
 
 type createAccountRequest struct {
@@ -63,6 +70,9 @@ func (h *Handler) Run(addr string) error {
 	r.POST("/employees", h.CreateEmployee)
 	r.POST("/employees/:id", h.UpdateEmployee)
 	r.POST("/employees/:id/deactivate", h.DeactivateEmployee)
+
+	// Messages
+	r.GET("/chats/:id/messages", h.ListMessagesByChat)
 
 	return r.Run(addr)
 }
@@ -285,4 +295,56 @@ func (h *Handler) DeactivateEmployee(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"status": "deactivated"})
+}
+
+// --- Messages ---
+
+func (h *Handler) ListMessagesByChat(c *gin.Context) {
+	chatID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || chatID <= 0 {
+		c.JSON(400, gin.H{"error": "id must be a positive number"})
+		return
+	}
+
+	limit := 50
+	if l := c.Query("limit"); l != "" {
+		parsedLimit, err := strconv.Atoi(l)
+		if err != nil || parsedLimit <= 0 {
+			c.JSON(400, gin.H{"error": "limit must be a positive number"})
+			return
+		}
+		limit = parsedLimit
+	}
+
+	offset := 0
+	if o := c.Query("offset"); o != "" {
+		parsedOffset, err := strconv.Atoi(o)
+		if err != nil || parsedOffset < 0 {
+			c.JSON(400, gin.H{"error": "offset must be a non-negative number"})
+			return
+		}
+		offset = parsedOffset
+	}
+
+	if h.messageUsecase == nil {
+		res := make([]domain.Message, 0)
+		for _, m := range mockMessages {
+			if m.ChatID == chatID {
+				res = append(res, m)
+			}
+		}
+		c.JSON(200, res)
+		return
+	}
+
+	messages, err := h.messageUsecase.ListByChat(c.Request.Context(), chatID, limit, offset)
+	if err != nil {
+		if errors.Is(err, domain.ErrValidation) {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, messages)
 }

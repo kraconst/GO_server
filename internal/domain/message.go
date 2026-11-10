@@ -21,11 +21,11 @@ const (
 
 // Message — сообщение диалога. Пара ChatID и TelegramMessageID должна быть уникальна.
 type Message struct {
-	ID                int64            `json:"id"`
-	ChatID            int64            `json:"chat_id"`
-	TelegramMessageID int64            `json:"telegram_message_id"`
-	Direction         MessageDirection `json:"direction"`
-	Text              string           `json:"text"`
-	MediaType         *MediaType       `json:"media_type"`
-	SentAt            time.Time        `json:"sent_at"`
+	ID                int64            `json:"id" db:"id"`
+	ChatID            int64            `json:"chat_id" db:"chat_id"`
+	TelegramMessageID int64            `json:"telegram_message_id" db:"telegram_message_id"`
+	Direction         MessageDirection `json:"direction" db:"direction"`
+	Text              string           `json:"text" db:"text"`
+	MediaType         *MediaType       `json:"media_type" db:"media_type"`
+	SentAt            time.Time        `json:"sent_at" db:"sent_at"`
 }
