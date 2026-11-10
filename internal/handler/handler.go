@@ -11,16 +11,23 @@ import (
 )
 
 type Handler struct {
-	accountUsecase  *usecase.AccountUsecase
-	employeeUsecase *usecase.EmployeeUsecase
-	messageUsecase  *usecase.MessageUsecase
+	accountUsecase           *usecase.AccountUsecase
+	employeeUsecase          *usecase.EmployeeUsecase
+	messageUsecase           *usecase.MessageUsecase
+	accountDailyStatsUsecase *usecase.AccountDailyStatsUsecase
 }
 
-func New(accountUsecase *usecase.AccountUsecase, employeeUsecase *usecase.EmployeeUsecase, messageUsecase *usecase.MessageUsecase) *Handler {
+func New(
+	accountUsecase *usecase.AccountUsecase,
+	employeeUsecase *usecase.EmployeeUsecase,
+	messageUsecase *usecase.MessageUsecase,
+	accountDailyStatsUsecase *usecase.AccountDailyStatsUsecase,
+) *Handler {
 	return &Handler{
-		accountUsecase:  accountUsecase,
-		employeeUsecase: employeeUsecase,
-		messageUsecase:  messageUsecase,
+		accountUsecase:           accountUsecase,
+		employeeUsecase:          employeeUsecase,
+		messageUsecase:           messageUsecase,
+		accountDailyStatsUsecase: accountDailyStatsUsecase,
 	}
 }
 
@@ -37,6 +44,40 @@ var mockEmployees = []domain.Employee{
 var mockMessages = []domain.Message{
 	{ID: 1, ChatID: 1, TelegramMessageID: 101, Direction: domain.MessageDirectionIn, Text: "Здравствуйте! Подскажите по условиям.", SentAt: time.Date(2026, 9, 1, 10, 5, 0, 0, time.UTC)},
 	{ID: 2, ChatID: 1, TelegramMessageID: 102, Direction: domain.MessageDirectionOut, Text: "Добрый день! Сейчас направлю КП.", SentAt: time.Date(2026, 9, 1, 10, 6, 0, 0, time.UTC)},
+}
+
+var mockDashboard = domain.DashboardStats{
+	MessagesIn:      1420,
+	MessagesOut:     1180,
+	ActiveChats:     85,
+	NewContacts:     34,
+	AvgResponseTime: 4 * time.Minute,
+	UnansweredChats: 3,
+}
+
+var mockAccountRatings = []domain.AccountRating{
+	{
+		AccountID:       1,
+		Username:        "@sales_anna",
+		EmployeeName:    "Анна",
+		MessagesIn:      850,
+		MessagesOut:     720,
+		TotalMessages:   1570,
+		ActiveChats:     52,
+		NewContacts:     21,
+		AvgResponseTime: 3 * time.Minute,
+	},
+	{
+		AccountID:       2,
+		Username:        "@support_oleg",
+		EmployeeName:    "Олег",
+		MessagesIn:      570,
+		MessagesOut:     460,
+		TotalMessages:   1030,
+		ActiveChats:     33,
+		NewContacts:     13,
+		AvgResponseTime: 5 * time.Minute,
+	},
 }
 
 type createAccountRequest struct {
@@ -73,6 +114,10 @@ func (h *Handler) Run(addr string) error {
 
 	// Messages
 	r.GET("/chats/:id/messages", h.ListMessagesByChat)
+
+	// Analytics
+	r.GET("/analytics/dashboard", h.GetDashboard)
+	r.GET("/analytics/accounts", h.GetAccountRatings)
 
 	return r.Run(addr)
 }
@@ -347,4 +392,83 @@ func (h *Handler) ListMessagesByChat(c *gin.Context) {
 		return
 	}
 	c.JSON(200, messages)
+}
+
+// --- Analytics ---
+
+func parseDateRange(fromStr, toStr string) (time.Time, time.Time, error) {
+	var from, to time.Time
+	var err error
+
+	if toStr != "" {
+		to, err = time.Parse("2006-01-02", toStr)
+		if err != nil {
+			return time.Time{}, time.Time{}, errors.New("to must be in format YYYY-MM-DD")
+		}
+	} else {
+		to = time.Now().UTC()
+	}
+
+	if fromStr != "" {
+		from, err = time.Parse("2006-01-02", fromStr)
+		if err != nil {
+			return time.Time{}, time.Time{}, errors.New("from must be in format YYYY-MM-DD")
+		}
+	} else {
+		from = to.AddDate(0, 0, -30)
+	}
+
+	if from.After(to) {
+		return time.Time{}, time.Time{}, errors.New("from date must not be after to date")
+	}
+
+	return from, to, nil
+}
+
+func (h *Handler) GetDashboard(c *gin.Context) {
+	from, to, err := parseDateRange(c.Query("from"), c.Query("to"))
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	if h.accountDailyStatsUsecase == nil {
+		c.JSON(200, mockDashboard)
+		return
+	}
+
+	stats, err := h.accountDailyStatsUsecase.GetDashboard(c.Request.Context(), 1, from, to)
+	if err != nil {
+		if errors.Is(err, domain.ErrValidation) {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, stats)
+}
+
+func (h *Handler) GetAccountRatings(c *gin.Context) {
+	from, to, err := parseDateRange(c.Query("from"), c.Query("to"))
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	if h.accountDailyStatsUsecase == nil {
+		c.JSON(200, mockAccountRatings)
+		return
+	}
+
+	ratings, err := h.accountDailyStatsUsecase.GetAccountRatings(c.Request.Context(), 1, from, to)
+	if err != nil {
+		if errors.Is(err, domain.ErrValidation) {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, ratings)
 }

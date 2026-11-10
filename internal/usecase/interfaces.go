@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"time"
 
 	"github.com/kraconst/GO_server/internal/domain"
 )
@@ -35,4 +36,14 @@ type CompanyRepository interface {
 type MessageRepository interface {
 	Create(ctx context.Context, msg domain.Message) (int64, error)
 	ListByChat(ctx context.Context, chatID int64, limit, offset int) ([]domain.Message, error)
+}
+
+// AccountDailyStatsRepository определяет контракт доступа к дневной аналитике аккаунтов.
+type AccountDailyStatsRepository interface {
+	Upsert(ctx context.Context, stats domain.AccountDailyStats) error
+	IncrementCounters(ctx context.Context, accountID int64, day time.Time, messagesIn, messagesOut, newContacts int) error
+	GetByAccountAndDateRange(ctx context.Context, accountID int64, from, to time.Time) ([]domain.AccountDailyStats, error)
+	GetByCompanyAndDateRange(ctx context.Context, companyID int64, from, to time.Time) ([]domain.AccountDailyStats, error)
+	GetDashboard(ctx context.Context, companyID int64, from, to time.Time) (*domain.DashboardStats, error)
+	GetAccountRatings(ctx context.Context, companyID int64, from, to time.Time) ([]domain.AccountRating, error)
 }
